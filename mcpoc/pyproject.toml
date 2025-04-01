@@ -1,0 +1,17 @@
+[project]
+name = "mcpoc"
+version = "0.1.0"
+description = "mcpoc desc"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [ "mcp>=1.6.0",]
+[[project.authors]]
+name = "laluka"
+email = "loukajc@gmail.com"
+
+[build-system]
+requires = [ "hatchling",]
+build-backend = "hatchling.build"
+
+[project.scripts]
+mcpoc = "mcpoc:main"

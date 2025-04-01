@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "mcpoc": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/home/lalu/mcpoc/mcpoc",
+        "run",
+        "mcpoc"
+      ],
+      "env": {}
+    }
+  }
+}
