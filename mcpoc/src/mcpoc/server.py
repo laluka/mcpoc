@@ -1,4 +1,6 @@
 import asyncio
+import subprocess
+from typing import Optional
 
 from mcp.server.models import InitializationOptions
 import mcp.types as types
@@ -6,92 +8,8 @@ from mcp.server import NotificationOptions, Server
 from pydantic import AnyUrl
 import mcp.server.stdio
 
-# Store notes as a simple key-value dict to demonstrate state management
-notes: dict[str, str] = {"note 1 test": "note 1 content"}
-
 server = Server("mcpoc")
 
-@server.list_resources()
-async def handle_list_resources() -> list[types.Resource]:
-    """
-    List available note resources.
-    Each note is exposed as a resource with a custom note:// URI scheme.
-    """
-    return [
-        types.Resource(
-            uri=AnyUrl(f"note://internal/{name}"),
-            name=f"Note: {name}",
-            description=f"A simple note named {name}",
-            mimeType="text/plain",
-        )
-        for name in notes
-    ]
-
-@server.read_resource()
-async def handle_read_resource(uri: AnyUrl) -> str:
-    """
-    Read a specific note's content by its URI.
-    The note name is extracted from the URI host component.
-    """
-    if uri.scheme != "note":
-        raise ValueError(f"Unsupported URI scheme: {uri.scheme}")
-
-    name = uri.path
-    if name is not None:
-        name = name.lstrip("/")
-        return notes[name]
-    raise ValueError(f"Note not found: {name}")
-
-@server.list_prompts()
-async def handle_list_prompts() -> list[types.Prompt]:
-    """
-    List available prompts.
-    Each prompt can have optional arguments to customize its behavior.
-    """
-    return [
-        types.Prompt(
-            name="summarize-notes",
-            description="Creates a summary of all notes",
-            arguments=[
-                types.PromptArgument(
-                    name="style",
-                    description="Style of the summary (brief/detailed)",
-                    required=False,
-                )
-            ],
-        )
-    ]
-
-@server.get_prompt()
-async def handle_get_prompt(
-    name: str, arguments: dict[str, str] | None
-) -> types.GetPromptResult:
-    """
-    Generate a prompt by combining arguments with server state.
-    The prompt includes all current notes and can be customized via arguments.
-    """
-    if name != "summarize-notes":
-        raise ValueError(f"Unknown prompt: {name}")
-
-    style = (arguments or {}).get("style", "brief")
-    detail_prompt = " Give extensive details." if style == "detailed" else ""
-
-    return types.GetPromptResult(
-        description="Summarize the current notes",
-        messages=[
-            types.PromptMessage(
-                role="user",
-                content=types.TextContent(
-                    type="text",
-                    text=f"Here are the current notes to summarize:{detail_prompt}\n\n"
-                    + "\n".join(
-                        f"- {name}: {content}"
-                        for name, content in notes.items()
-                    ),
-                ),
-            )
-        ],
-    )
 
 @server.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
@@ -101,18 +19,25 @@ async def handle_list_tools() -> list[types.Tool]:
     """
     return [
         types.Tool(
-            name="add-note",
-            description="Add a new note",
+            name="run-command",
+            description="Execute a shell command and return its output",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"},
-                    "content": {"type": "string"},
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to execute",
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Working directory for the command (optional)",
+                    },
                 },
-                "required": ["name", "content"],
+                "required": ["command"],
             },
         )
     ]
+
 
 @server.call_tool()
 async def handle_call_tool(
@@ -122,30 +47,56 @@ async def handle_call_tool(
     Handle tool execution requests.
     Tools can modify server state and notify clients of changes.
     """
-    if name != "add-note":
+    if name != "run-command":
         raise ValueError(f"Unknown tool: {name}")
 
     if not arguments:
         raise ValueError("Missing arguments")
 
-    note_name = arguments.get("name")
-    content = arguments.get("content")
+    command = arguments.get("command")
+    cwd = arguments.get("cwd", "/tmp")
 
-    if not note_name or not content:
-        raise ValueError("Missing name or content")
+    if not command:
+        raise ValueError("Missing command")
 
-    # Update server state
-    notes[note_name] = content
-
-    # Notify clients that resources have changed
-    await server.request_context.session.send_resource_list_changed()
-
-    return [
-        types.TextContent(
-            type="text",
-            text=f"Added note '{note_name}' with content: {content}",
+    try:
+        # Run the command with shell=True for bash interpolation
+        process = subprocess.Popen(
+            command,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=cwd,
         )
-    ]
+
+        stdout, stderr = process.communicate()
+
+        # Prepare the response
+        response_parts = []
+
+        if stdout:
+            response_parts.append(f"stdout:\n{stdout}")
+        if stderr:
+            response_parts.append(f"stderr:\n{stderr}")
+        if not stdout and not stderr:
+            response_parts.append("Command executed successfully with no output")
+
+        return [
+            types.TextContent(
+                type="text",
+                text="\n".join(response_parts),
+            )
+        ]
+
+    except Exception as e:
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Error executing command: {str(e)}",
+            )
+        ]
+
 
 async def main():
     # Run the server using stdin/stdout streams
