@@ -1,6 +1,7 @@
 import asyncio
 import subprocess
 from typing import Optional
+import os
 
 from mcp.server.models import InitializationOptions
 import mcp.types as types
@@ -19,23 +20,42 @@ async def handle_list_tools() -> list[types.Tool]:
     """
     return [
         types.Tool(
-            name="run-command",
-            description="Execute a shell command and return its output",
+            name="write",
+            description="Write C code to /tmp/main.c",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "command": {
+                    "code": {
                         "type": "string",
-                        "description": "The shell command to execute",
-                    },
-                    "cwd": {
-                        "type": "string",
-                        "description": "Working directory for the command (optional)",
+                        "description": "The C code to write to /tmp/main.c",
                     },
                 },
-                "required": ["command"],
+                "required": ["code"],
             },
-        )
+        ),
+        types.Tool(
+            name="compile",
+            description="Compile the C code in /tmp/main.c using gcc",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        types.Tool(
+            name="disassembly",
+            description="Generate disassembly of a binary using objdump",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "binary": {
+                        "type": "string",
+                        "description": "Path to the binary to disassemble",
+                    },
+                },
+                "required": ["binary"],
+            },
+        ),
     ]
 
 
@@ -47,55 +67,109 @@ async def handle_call_tool(
     Handle tool execution requests.
     Tools can modify server state and notify clients of changes.
     """
-    if name != "run-command":
-        raise ValueError(f"Unknown tool: {name}")
-
     if not arguments:
-        raise ValueError("Missing arguments")
+        arguments = {}
 
-    command = arguments.get("command")
-    cwd = arguments.get("cwd", "/tmp")
+    if name == "write":
+        code = arguments.get("code")
+        if not code:
+            raise ValueError("Missing code")
 
-    if not command:
-        raise ValueError("Missing command")
+        try:
+            with open("/tmp/main.c", "w") as f:
+                f.write(code)
+            return [
+                types.TextContent(
+                    type="text",
+                    text="Successfully wrote code to /tmp/main.c",
+                )
+            ]
+        except Exception as e:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Error writing code: {str(e)}",
+                )
+            ]
 
-    try:
-        # Run the command with shell=True for bash interpolation
-        process = subprocess.Popen(
-            command,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=cwd,
-        )
-
-        stdout, stderr = process.communicate()
-
-        # Prepare the response
-        response_parts = []
-
-        if stdout:
-            response_parts.append(f"stdout:\n{stdout}")
-        if stderr:
-            response_parts.append(f"stderr:\n{stderr}")
-        if not stdout and not stderr:
-            response_parts.append("Command executed successfully with no output")
-
-        return [
-            types.TextContent(
-                type="text",
-                text="\n".join(response_parts),
+    elif name == "compile":
+        try:
+            process = subprocess.Popen(
+                ["gcc", "/tmp/main.c", "-o", "/tmp/main"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
-        ]
+            stdout, stderr = process.communicate()
 
-    except Exception as e:
-        return [
-            types.TextContent(
-                type="text",
-                text=f"Error executing command: {str(e)}",
+            if process.returncode == 0:
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=f"Successfully compiled to /tmp/main",
+                    )
+                ]
+            else:
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=f"Compilation failed:\n{stderr}",
+                    )
+                ]
+        except Exception as e:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Error during compilation: {str(e)}",
+                )
+            ]
+
+    elif name == "disassembly":
+        binary = arguments.get("binary")
+        if not binary:
+            raise ValueError("Missing binary path")
+
+        if not os.path.exists(binary):
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Error: Binary file {binary} does not exist",
+                )
+            ]
+
+        try:
+            process = subprocess.Popen(
+                ["objdump", "-d", binary],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
-        ]
+            stdout, stderr = process.communicate()
+
+            if process.returncode == 0:
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=stdout,
+                    )
+                ]
+            else:
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=f"Disassembly failed:\n{stderr}",
+                    )
+                ]
+        except Exception as e:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Error during disassembly: {str(e)}",
+                )
+            ]
+
+    else:
+        raise ValueError(f"Unknown tool: {name}")
 
 
 async def main():

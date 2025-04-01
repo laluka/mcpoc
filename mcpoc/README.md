@@ -2,6 +2,14 @@
 
 mcpoc desc
 
+Test prompt:
+
+```text
+reverse the source code of /home/lalu/Documents/challenge
+```
+
+npx @modelcontextprotocol/inspector uv --directory /home/lalu/mcpoc/mcpoc run mcpoc
+
 ## Components
 
 ### Resources
