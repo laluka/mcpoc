@@ -12,6 +12,8 @@ If you want to know how to use this badly documented PoC!
 ## Setup & Test
 
 ```bash
+git clone https://github.com/laluka/mcpoc
+sudo mv mcpoc /tmp/mcpoc && cd /tmp/mcpoc
 mise install
 gcc challenge.c -o /tmp/challenge
 npm install -g @anthropic-ai/claude-code
